@@ -73,101 +73,44 @@ class ShoppingAssistant:
             else:
                 raise ValueError("Invalid response received from OpenAI API")
 
-            # Debug print
-            print(f"🔍 Debug - Parsed Query from LLM: {parsed_response}")  # <--- Debugging Here
-
-            # Ensure correct interpretation of categories directly from dataset
-            # If category is missing, extract from "affirmations"
+            # 🚨 Handle affirmations and update category
             if not parsed_response.get("category") and "affirmations" in parsed_response:
-                if isinstance(parsed_response["affirmations"], dict):
-                    print(f"⚠️ Debug - 'affirmations' is a dict. Attempting to extract category...")
-                    if "category" in parsed_response["affirmations"]:
-                        parsed_response["category"] = parsed_response["affirmations"]["category"]
-                        print(f"✅ Debug - Extracted category from dict affirmations: {parsed_response['category']}")
-                elif isinstance(parsed_response["affirmations"], list):
-                    for affirmation in parsed_response["affirmations"]:
-                        if isinstance(affirmation, str) and affirmation.lower() in self.all_categories:
-                            parsed_response["category"] = affirmation.lower()
-                            print(f"✅ Debug - Extracted category from list affirmations: {parsed_response['category']}")
+                affirmations = parsed_response["affirmations"]
+                if isinstance(affirmations, list):
+                    for affirmation in affirmations:
+                        if isinstance(affirmation, dict) and "category" in affirmation:
+                            parsed_response["category"] = affirmation["category"]
                             break  # Stop at first match
-
-                if isinstance(parsed_response["affirmations"], list):  # Handle list format
-                    for affirmation in parsed_response["affirmations"]:
-                        if isinstance(affirmation, str) and affirmation.lower() in self.all_categories:
+                        elif isinstance(affirmation, str) and affirmation.lower() in self.all_categories:
                             parsed_response["category"] = affirmation.lower()
                             break  # Stop at first match
 
-            # Convert to lowercase
-            if parsed_response.get("category"):
-                if isinstance(parsed_response["category"], str):
-                    parsed_response["category"] = parsed_response["category"].lower()
-                elif isinstance(parsed_response["category"], dict):  # Fix if LLM returns a dict
-                    print(
-                        f"⚠️ Debug - Expected string for 'category', but got {type(parsed_response['category'])}. Fixing...")
-                    parsed_response["category"] = ""  # Reset to empty string
 
-            if parsed_response.get("brand"):
-                if isinstance(parsed_response["brand"], str):
-                    parsed_response["brand"] = parsed_response["brand"].lower()
-                else:
-                    print(
-                        f"⚠️ Debug - Expected string for 'brand', but got {type(parsed_response['brand'])}. Fixing...")
-                    parsed_response["brand"] = ""  # Reset to empty string if it's not a valid string
+            # Ensure category is a string
+            if isinstance(parsed_response.get("category"), dict):
+                print(
+                    f"⚠️ Debug - Expected string for 'category', but got {type(parsed_response['category'])}. Fixing...")
+                parsed_response["category"] = ""
 
+            # Ensure brand extraction (same logic you had)
             if parsed_response.get("brand", "") in ["all", "all options", "any"]:
                 parsed_response["brand"] = None
-
-            # If brand is missing, extract manually from user input
-            if not parsed_response.get("brand") or isinstance(parsed_response["brand"], dict):  # Prevent dict error
-                extracted_brand = next((brand for brand in self.all_brands if brand.lower() in user_input.lower()),
-                                       None)
+            elif not parsed_response.get("brand") or isinstance(parsed_response["brand"], dict):
+                extracted_brand = next(
+                    (brand for brand in self.all_brands if brand.lower() in user_input.lower()), None
+                )
                 if extracted_brand:
                     parsed_response["brand"] = extracted_brand
                     print(f"✅ Debug - Manually extracted brand: {parsed_response['brand']}")
                 else:
-                    parsed_response["brand"] = None  # Ensure brand is not a dict
+                    parsed_response["brand"] = None
 
-            # Convert to lowercase for consistency
-            if parsed_response.get("brand"):
-                if isinstance(parsed_response["brand"], str):
-                    parsed_response["brand"] = parsed_response["brand"].lower()
-                elif isinstance(parsed_response["brand"], dict):  # Fix if LLM returns a dict
-                    print(
-                        f"⚠️ Debug - Expected string for 'brand', but got {type(parsed_response['brand'])}. Fixing...")
-                    parsed_response["brand"] = ""  # Reset to empty string
-
-            # Ensure brand is properly extracted if it's inside "affirmations"
-            if not parsed_response.get("brand") and "affirmations" in parsed_response:
-                if isinstance(parsed_response["affirmations"], dict) and "brand" in parsed_response["affirmations"]:
-                    parsed_response["brand"] = parsed_response["affirmations"]["brand"]
-
-            # Convert to lowercase for consistency
-            if parsed_response.get("brand") and isinstance(parsed_response["brand"], str):
-                parsed_response["brand"] = parsed_response["brand"].lower()
-
-            print(f"✅ Debug - Extracted brand: {parsed_response.get('brand')}")  # Debugging
-
-            # ✅ Ensure exclusions are properly extracted
-            # Ensure exclusions is a properly formatted list
-            # Ensure exclusions is a properly formatted list
+            # **Initialize exclusions as an empty list if missing or invalid**
             exclusions = parsed_response.get("exclusions", [])
-
-            # Convert dict to list if needed
-            if isinstance(exclusions, dict):
-                print(f"⚠️ Debug - Expected list for 'exclusions', but got a dict. Fixing...")
-                exclusions = list(exclusions.values())  # Convert dict values to list
-
-            # Ensure exclusions is a list
-            if not isinstance(exclusions, list):
-                print(f"⚠️ Debug - Expected list for 'exclusions', but got {type(exclusions)}. Fixing...")
+            if not isinstance(exclusions, list):  # Ensure exclusions is a list
                 exclusions = []
-
-            # Convert exclusions to lowercase and remove duplicates
-            exclusions = list(set(exclusion.lower() for exclusion in exclusions if isinstance(exclusion, str)))
-
+            exclusions = [str(ex).lower() for ex in exclusions]  # Convert exclusions to lowercase strings
             parsed_response["exclusions"] = exclusions
-
-            print(f"✅ Debug - Final exclusions list: {parsed_response.get('exclusions')}")  # Debugging
 
             return {
                 "brand": parsed_response.get("brand", ""),
@@ -186,6 +129,7 @@ class ShoppingAssistant:
                 "price_range": None,
                 "exclusions": []
             }
+
     def process_query(self, user_input_list):
         """Process user queries, parse with LLM, and refine recommendations based on stored preferences."""
         responses = []
@@ -277,9 +221,12 @@ class ShoppingAssistant:
             if exclusions:
                 print(f"✅ Debug - Applying exclusions: {exclusions}")  # Debugging
 
+            # Ensure exclusions are all strings and lowercase before filtering
+            exclusions = [ex.lower() if isinstance(ex, str) else str(ex) for ex in exclusions]
+
             filtered_products = [
                 product for product in filtered_products
-                if product.get("brand", "").strip().lower() not in exclusions  # Exact match, not substring match
+                if not any(ex in product.get("brand", "").strip().lower() for ex in exclusions)
             ]
 
             print(f"✅ Debug - Products after exclusions: {len(filtered_products)}")  # Debugging
