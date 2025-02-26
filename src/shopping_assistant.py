@@ -79,39 +79,62 @@ class ShoppingAssistant:
             # Ensure correct interpretation of categories directly from dataset
             # If category is missing, extract from "affirmations"
             if not parsed_response.get("category") and "affirmations" in parsed_response:
-                if isinstance(parsed_response["affirmations"], dict) and "category" in parsed_response["affirmations"]:
-                    parsed_response["category"] = parsed_response["affirmations"]["category"]
-                elif isinstance(parsed_response["affirmations"], list):  # Handle list format
+                if isinstance(parsed_response["affirmations"], dict):
+                    print(f"⚠️ Debug - 'affirmations' is a dict. Attempting to extract category...")
+                    if "category" in parsed_response["affirmations"]:
+                        parsed_response["category"] = parsed_response["affirmations"]["category"]
+                        print(f"✅ Debug - Extracted category from dict affirmations: {parsed_response['category']}")
+                elif isinstance(parsed_response["affirmations"], list):
                     for affirmation in parsed_response["affirmations"]:
-                        if affirmation.lower() in self.all_categories:
+                        if isinstance(affirmation, str) and affirmation.lower() in self.all_categories:
+                            parsed_response["category"] = affirmation.lower()
+                            print(f"✅ Debug - Extracted category from list affirmations: {parsed_response['category']}")
+                            break  # Stop at first match
+
+                if isinstance(parsed_response["affirmations"], list):  # Handle list format
+                    for affirmation in parsed_response["affirmations"]:
+                        if isinstance(affirmation, str) and affirmation.lower() in self.all_categories:
                             parsed_response["category"] = affirmation.lower()
                             break  # Stop at first match
 
             # Convert to lowercase
-            if parsed_response.get("category") and isinstance(parsed_response["category"], str):
-                parsed_response["category"] = parsed_response["category"].lower()
+            if parsed_response.get("category"):
+                if isinstance(parsed_response["category"], str):
+                    parsed_response["category"] = parsed_response["category"].lower()
+                elif isinstance(parsed_response["category"], dict):  # Fix if LLM returns a dict
+                    print(
+                        f"⚠️ Debug - Expected string for 'category', but got {type(parsed_response['category'])}. Fixing...")
+                    parsed_response["category"] = ""  # Reset to empty string
 
-            print(f"✅ Debug - Extracted category: {parsed_response.get('category')}")  # Debugging
-
-            if parsed_response.get("brand") and isinstance(parsed_response["brand"], str):
-                parsed_response["brand"] = parsed_response["brand"].lower()
+            if parsed_response.get("brand"):
+                if isinstance(parsed_response["brand"], str):
+                    parsed_response["brand"] = parsed_response["brand"].lower()
+                else:
+                    print(
+                        f"⚠️ Debug - Expected string for 'brand', but got {type(parsed_response['brand'])}. Fixing...")
+                    parsed_response["brand"] = ""  # Reset to empty string if it's not a valid string
 
             if parsed_response.get("brand", "") in ["all", "all options", "any"]:
                 parsed_response["brand"] = None
 
             # If brand is missing, extract manually from user input
-            if not parsed_response.get("brand"):
+            if not parsed_response.get("brand") or isinstance(parsed_response["brand"], dict):  # Prevent dict error
                 extracted_brand = next((brand for brand in self.all_brands if brand.lower() in user_input.lower()),
                                        None)
                 if extracted_brand:
                     parsed_response["brand"] = extracted_brand
-                    print(f"✅ Debug - Manually extracted brand: {parsed_response['brand']}")  # Debugging
+                    print(f"✅ Debug - Manually extracted brand: {parsed_response['brand']}")
+                else:
+                    parsed_response["brand"] = None  # Ensure brand is not a dict
 
             # Convert to lowercase for consistency
-            if parsed_response.get("brand") and isinstance(parsed_response["brand"], str):
-                parsed_response["brand"] = parsed_response["brand"].lower()
-
-            print(f"✅ Debug - Extracted brand: {parsed_response.get('brand')}")  # Debugging
+            if parsed_response.get("brand"):
+                if isinstance(parsed_response["brand"], str):
+                    parsed_response["brand"] = parsed_response["brand"].lower()
+                elif isinstance(parsed_response["brand"], dict):  # Fix if LLM returns a dict
+                    print(
+                        f"⚠️ Debug - Expected string for 'brand', but got {type(parsed_response['brand'])}. Fixing...")
+                    parsed_response["brand"] = ""  # Reset to empty string
 
             # Ensure brand is properly extracted if it's inside "affirmations"
             if not parsed_response.get("brand") and "affirmations" in parsed_response:
@@ -124,25 +147,24 @@ class ShoppingAssistant:
 
             print(f"✅ Debug - Extracted brand: {parsed_response.get('brand')}")  # Debugging
 
-            if not parsed_response.get("category"):
-                print("⚠️ Debug - Category missing from LLM response, keeping previous category")  # Debugging
-                parsed_response["category"] = st.session_state.preferences.get("category", None)
+            # ✅ Ensure exclusions are properly extracted
+            exclusions = parsed_response.get("exclusions", [])
+            if not isinstance(exclusions, list):
+                print(f"⚠️ Debug - Expected list for 'exclusions', but got {type(exclusions)}. Fixing...")
+                exclusions = []
 
-                # If still missing, check user input
-                if not parsed_response["category"]:
-                    extracted_category = next((cat for cat in self.all_categories if cat in user_input.lower()), None)
-                    if extracted_category:
-                        parsed_response["category"] = extracted_category
-                        print(f"✅ Debug - Manually extracted category: {parsed_response['category']}")  # Debugging
+            parsed_response["exclusions"] = exclusions
+
+            print(f"✅ Debug - Final exclusions list: {parsed_response.get('exclusions')}")  # Debugging
 
             return {
                 "brand": parsed_response.get("brand", ""),
                 "category": parsed_response.get("category", ""),
                 "color": parsed_response.get("color", ""),
                 "price_range": parsed_response.get("price_range", None),
-                "exclusions": list(parsed_response.get("exclusions", [])) if isinstance(
-                    parsed_response.get("exclusions"), list) else []
+                "exclusions": exclusions
             }
+
         except Exception as e:
             print(f"❌ LLM Parsing Error: {e}")
             return {
@@ -242,12 +264,10 @@ class ShoppingAssistant:
 
             filtered_products = [
                 product for product in filtered_products
-                if product.get("brand", "").strip().lower() not in [exclusion.lower() for exclusion in exclusions]
-                   and product.get("category", "").strip().lower() not in [exclusion.lower() for exclusion in
-                                                                           exclusions]
+                if all(exclusion.lower() not in product.get("brand", "").strip().lower() for exclusion in exclusions)
             ]
-
             print(f"✅ Debug - Products after exclusions: {len(filtered_products)}")  # Debugging
+
 
             # **Step 4: Apply Scoring to the Remaining Products**
             product_scores = []
