@@ -77,19 +77,41 @@ class ShoppingAssistant:
             print(f"🔍 Debug - Parsed Query from LLM: {parsed_response}")  # <--- Debugging Here
 
             # Ensure correct interpretation of categories directly from dataset
+            # If category is missing, extract from "affirmations"
+            if not parsed_response.get("category") and "affirmations" in parsed_response:
+                if isinstance(parsed_response["affirmations"], dict) and "category" in parsed_response["affirmations"]:
+                    parsed_response["category"] = parsed_response["affirmations"]["category"]
+                elif isinstance(parsed_response["affirmations"], list):  # Handle list format
+                    for affirmation in parsed_response["affirmations"]:
+                        if affirmation.lower() in self.all_categories:
+                            parsed_response["category"] = affirmation.lower()
+                            break  # Stop at first match
+
+            # Convert to lowercase
             if parsed_response.get("category") and isinstance(parsed_response["category"], str):
-                # Extract category correctly if it's inside "affirmations"
-                if not parsed_response.get("category") and "affirmations" in parsed_response:
-                    if isinstance(parsed_response["affirmations"], dict) and "category" in parsed_response[
-                        "affirmations"]:
-                        parsed_response["category"] = parsed_response["affirmations"]["category"]
-            print(f"✅ Debug - Extracted category: {parsed_response.get('category')}")
+                parsed_response["category"] = parsed_response["category"].lower()
+
+            print(f"✅ Debug - Extracted category: {parsed_response.get('category')}")  # Debugging
 
             if parsed_response.get("brand") and isinstance(parsed_response["brand"], str):
                 parsed_response["brand"] = parsed_response["brand"].lower()
 
             if parsed_response.get("brand", "") in ["all", "all options", "any"]:
-                parsed_response["brand"] = None  # Keep None instead of an empty string
+                parsed_response["brand"] = None
+
+            # If brand is missing, extract manually from user input
+            if not parsed_response.get("brand"):
+                extracted_brand = next((brand for brand in self.all_brands if brand.lower() in user_input.lower()),
+                                       None)
+                if extracted_brand:
+                    parsed_response["brand"] = extracted_brand
+                    print(f"✅ Debug - Manually extracted brand: {parsed_response['brand']}")  # Debugging
+
+            # Convert to lowercase for consistency
+            if parsed_response.get("brand") and isinstance(parsed_response["brand"], str):
+                parsed_response["brand"] = parsed_response["brand"].lower()
+
+            print(f"✅ Debug - Extracted brand: {parsed_response.get('brand')}")  # Debugging
 
             # Ensure brand is properly extracted if it's inside "affirmations"
             if not parsed_response.get("brand") and "affirmations" in parsed_response:
@@ -104,8 +126,14 @@ class ShoppingAssistant:
 
             if not parsed_response.get("category"):
                 print("⚠️ Debug - Category missing from LLM response, keeping previous category")  # Debugging
-                parsed_response["category"] = st.session_state.preferences.get("category",
-                                                                               None)  # Retain previous category
+                parsed_response["category"] = st.session_state.preferences.get("category", None)
+
+                # If still missing, check user input
+                if not parsed_response["category"]:
+                    extracted_category = next((cat for cat in self.all_categories if cat in user_input.lower()), None)
+                    if extracted_category:
+                        parsed_response["category"] = extracted_category
+                        print(f"✅ Debug - Manually extracted category: {parsed_response['category']}")  # Debugging
 
             return {
                 "brand": parsed_response.get("brand", ""),
@@ -160,7 +188,7 @@ class ShoppingAssistant:
                         product for product in filtered_products
                         if product.get("brand",
                                        "").strip().lower() == filter_value.strip().lower()  # Case-insensitive match
-                           or fuzz.partial_ratio(product.get("brand", "").lower(), filter_value.lower()) > 75
+                           or fuzz.partial_ratio(product.get("brand", "").lower(), filter_value.lower()) > 80
                         # Fuzzy match
                     ]
                     print(f"✅ Debug - Filtered {len(filtered_products)} products after brand filter")
@@ -207,12 +235,19 @@ class ShoppingAssistant:
             if len(filtered_products) == 0:
                 print("⚠️ Debug - No products left! Check filtering conditions.")
 
+
             # **Step 3: Apply Exclusions**
+            if exclusions:
+                print(f"✅ Debug - Applying exclusions: {exclusions}")  # Debugging
+
             filtered_products = [
                 product for product in filtered_products
-                if product.get("brand", "").lower() not in exclusions and product.get("category",
-                                                                                      "").lower() not in exclusions
+                if product.get("brand", "").strip().lower() not in [exclusion.lower() for exclusion in exclusions]
+                   and product.get("category", "").strip().lower() not in [exclusion.lower() for exclusion in
+                                                                           exclusions]
             ]
+
+            print(f"✅ Debug - Products after exclusions: {len(filtered_products)}")  # Debugging
 
             # **Step 4: Apply Scoring to the Remaining Products**
             product_scores = []
