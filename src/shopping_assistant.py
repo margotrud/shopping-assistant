@@ -148,10 +148,22 @@ class ShoppingAssistant:
             print(f"✅ Debug - Extracted brand: {parsed_response.get('brand')}")  # Debugging
 
             # ✅ Ensure exclusions are properly extracted
+            # Ensure exclusions is a properly formatted list
+            # Ensure exclusions is a properly formatted list
             exclusions = parsed_response.get("exclusions", [])
+
+            # Convert dict to list if needed
+            if isinstance(exclusions, dict):
+                print(f"⚠️ Debug - Expected list for 'exclusions', but got a dict. Fixing...")
+                exclusions = list(exclusions.values())  # Convert dict values to list
+
+            # Ensure exclusions is a list
             if not isinstance(exclusions, list):
                 print(f"⚠️ Debug - Expected list for 'exclusions', but got {type(exclusions)}. Fixing...")
                 exclusions = []
+
+            # Convert exclusions to lowercase and remove duplicates
+            exclusions = list(set(exclusion.lower() for exclusion in exclusions if isinstance(exclusion, str)))
 
             parsed_response["exclusions"] = exclusions
 
@@ -204,16 +216,18 @@ class ShoppingAssistant:
             print(f"🔍 Debug - Total Products Before Filtering: {len(filtered_products)}")  # Debugging
 
             for filter_type, filter_value in filters:
-
                 if filter_type == "brand" and filter_value:
-                    filtered_products = [
-                        product for product in filtered_products
-                        if product.get("brand",
-                                       "").strip().lower() == filter_value.strip().lower()  # Case-insensitive match
-                           or fuzz.partial_ratio(product.get("brand", "").lower(), filter_value.lower()) > 80
-                        # Fuzzy match
-                    ]
-                    print(f"✅ Debug - Filtered {len(filtered_products)} products after brand filter")
+                    # 🚨 Skip brand filtering if exclusions exist
+                    if exclusions:
+                        print(f"⚠️ Skipping brand filter because exclusions exist: {exclusions}")
+                    else:
+                        filtered_products = [
+                            product for product in filtered_products
+                            if product.get("brand", "").strip().lower() == filter_value.strip().lower()
+                               or fuzz.partial_ratio(product.get("brand", "").lower(), filter_value.lower()) > 80
+                        ]
+                        print(f"✅ Debug - Filtered {len(filtered_products)} products after brand filter")
+
                 elif filter_type == "brand" and not filter_value:
                     print("✅ Debug - No brand filtering applied, keeping all brands")
 
@@ -259,15 +273,16 @@ class ShoppingAssistant:
 
 
             # **Step 3: Apply Exclusions**
+            # Ensure exclusions are applied correctly
             if exclusions:
                 print(f"✅ Debug - Applying exclusions: {exclusions}")  # Debugging
 
             filtered_products = [
                 product for product in filtered_products
-                if all(exclusion.lower() not in product.get("brand", "").strip().lower() for exclusion in exclusions)
+                if product.get("brand", "").strip().lower() not in exclusions  # Exact match, not substring match
             ]
-            print(f"✅ Debug - Products after exclusions: {len(filtered_products)}")  # Debugging
 
+            print(f"✅ Debug - Products after exclusions: {len(filtered_products)}")  # Debugging
 
             # **Step 4: Apply Scoring to the Remaining Products**
             product_scores = []
