@@ -83,45 +83,24 @@ class ShoppingChatbot:
         """
         matching_products = []
 
-        #Detect which preference(s) were mentioned
-        num_active_filters = sum(1 for key in self.user_preferences if self.user_preferences[key] is not None)
-
         for product in self.products:
+            # Exclude brands, categories, colors and price
+            if "exclude" in self.user_preferences:
+                exclude_data = self.user_preferences["exclude"]
+
+                if product["brand"].lower() in exclude_data["brands"]:
+                    continue #Skip excluded brand
+                if product["category"].lower() in exclude_data["categories"]:
+                    continue #Skip excluded category
+                if product["color"].lower() in exclude_data["colors"]:
+                    continue #Skip excluded color
+
+                if exclude_data["price"] and float(product.get("price", 0)) < exclude_data["price"]:
+                    continue # Skip if price is below excluded threshold
+
+
             # if only brand is specified, return all products from that brand
-            if num_active_filters == 1 and self.user_preferences["brand"]:
-                if product["brand"].lower() == self.user_preferences["brand"]:
-                    matching_products.append(product)
-                continue #Skip other filters
-
-            # Match category if specified
-            if num_active_filters == 1 and self.user_preferences["category"]:
-                if product["category"].lower() == self.user_preferences["category"]:
-                    matching_products.append(product)
-                continue
-
-            # Match color if specified
-            if num_active_filters == 1 and self.user_preferences["color"]:
-                if product["color"].lower() == self.user_preferences["color"]:
-                    matching_products.append(product)
-                continue
-
-            # Match color group if specified
-            if num_active_filters == 1 and self.user_preferences["color_group"]:
-                if product["color"].lower() in self.color_groups.get(self.user_preferences["color_group"], {}):
-                    matching_products.append(product)
-                continue
-
-            if num_active_filters == 1 and self.user_preferences["price_range"]:
-                # Assuming products have a price field as a float
-                product_price = float(product.get("price", 0))
-                max_price = float(self.user_preferences["price_range"].replace("$", ""))
-                if product_price <= max_price:
-                    matching_products.append(product)
-                continue
-
-            # ✅ Otherwise, apply all active filters as normal
-            if self.user_preferences["category"] and product["category"].lower() != self.user_preferences[
-                "category"]:
+            if self.user_preferences["category"] and product["category"].lower() != self.user_preferences["category"]:
                 continue
 
             if self.user_preferences["color"] and product["color"].lower() != self.user_preferences["color"]:
@@ -139,7 +118,6 @@ class ShoppingChatbot:
                 max_price = float(self.user_preferences["price_range"].replace("$", ""))
                 if product_price > max_price:
                     continue
-
             # Add matching product
             matching_products.append(product)
 
@@ -154,58 +132,101 @@ class ShoppingChatbot:
         updated = False # Track if a preference is updated
 
         # Track what type of preference was detected
-        detected_preferences = {"brand": False, "category": False, "color": False, "color_group": False, "price_range": False}
+        detected_preferences = {"brands": False, "categories": False, "colors": False, "color_group": False, "price_range": False}
+
+        # Ensure exclusion storage exists
+        if "exclude" not in self.user_preferences:
+            self.user_preferences["exclude"]={
+                "brands": set(),
+                "categories": set(),
+                "colors": set(),
+                "price": None
+            }
+
+        # Detecting General exclusions (e.g., "not from fenty beauty", "except lipstick", "not pink"
+        exclusion_patterns = {
+        "brands": r"(?:not from|except)\s+([\w\s&]+)",  # e.g., "not from Fenty Beauty"
+        "categories": r"(?:not a|not an|except)\s+([\w\s]+)",  # e.g., "not a lipstick"
+        "colors": r"(?:not|except)\s+([\w\s]+)",  # e.g., "not pink"
+        "price": r"(?:not|except) under\s+\$(\d+)"  # e.g., "not under $20"
+    }
+
+        for key, pattern in exclusion_patterns.items():
+            match = re.findall(pattern, user_input.lower())
+            if match:
+                for excluded_value in match:
+                    excluded_value = excluded_value.strip().lower()
+                    if key == "price":
+                        self.user_preferences["exclude"]["price"] = float(excluded_value)
+                    else:
+                        self.user_preferences["exclude"][key].add(excluded_value)
+
+                    updated = True
+
+
 
         #Extract brand (if mentioned)
-        for brand in self.brands:
-            if brand in user_input.lower():
-                self.user_preferences["brand"] = brand
-                detected_preferences["brand"] = True
-                updated = True
-                break
-
-        #Extract category (if mentioned)
+        if not detected_preferences["brands"]:
+            for brand in self.brands:
+                if brand in user_input.lower() and brand not in self.user_preferences["exclude"]["brands"]:
+                    self.user_preferences["brand"] = brand
+                    detected_preferences["brand"] = True
+                    updated = True
+                    break
 
         # Extract category
-        for cat in self.categories:
-            if cat.lower() in user_input.lower():
-                self.user_preferences["category"] = cat
-                detected_preferences["category"] = True
-                updated = True
-                break
+        if not detected_preferences["categories"]:
+            for cat in self.categories:
+                if cat in user_input.lower() and cat not in self.user_preferences["exclude"]["categories"]:
+                    self.user_preferences["category"] = cat
+                    detected_preferences["category"] = True
+                    updated = True
+                    break
 
             # Check if the user specified a general color (e.g. "pink")
-        for base_color, shades in self.color_groups.items():
-            if base_color in user_input.lower():
-                self.user_preferences["color_group"] = base_color # Offer all shades of this base color
-                self.user_preferences["color"] = None # Clear specific color
-                detected_preferences["color_group"] = True
-                updated = True
-                break
+        if not detected_preferences["colors"]:
+            for base_color, shades in self.color_groups.items():
+                if base_color in user_input.lower() and base_color not in self.user_preferences["exclude"]["colors"]:
+                    self.user_preferences["color_group"] = base_color # Offer all shades of this base color
+                    self.user_preferences["color"] = None # Clear specific color
+                    detected_preferences["color_group"] = True
+                    updated = True
+                    break
 
         # Check if the user specified a specific color variation (e.g., "pink nude")
-        for color in self.colors:
-            if color in user_input.lower():
-                self.user_preferences["color"] = color # Store specific shade
-                self.user_preferences["color_group"] = None # Remove general color
-                detected_preferences["color"] = True
-                updated = True
-                break
-
+        if not detected_preferences["colors"]:
+            for color in self.colors:
+                if color in user_input.lower() and color not in self.user_preferences["exclude"]["colors"]:
+                    self.user_preferences["color"] = color # Store specific shade
+                    self.user_preferences["color_group"] = None # Remove general color
+                    detected_preferences["color"] = True
+                    updated = True
+                    break
 
         #Extract price
-        price_pattern =  r"\$(\d+)|(\d+\s?(dollars|euros|shekels))"
-        match = re.search(price_pattern, user_input)
-        if match:
-            self.user_preferences["price_range"] = match.group(0)
-            detected_preferences["price_range"] = True
-            updated = True
+        if not detected_preferences["price_range"]:
+            price_pattern =  r"\$(\d+)|(\d+\s?(dollars|euros|shekels))"
+            match = re.search(price_pattern, user_input)
+            if match:
+                self.user_preferences["price_range"] = match.group(0)
+                detected_preferences["price_range"] = True
+                updated = True
 
         #If only one preference is mentioned, reset the others:
         if sum(detected_preferences.values()) == 1:
-            for key in self.user_preferences.keys():
-                if not detected_preferences[key]: #Reset filters not mentioned
-                    self.user_preferences[key] = None
+            for key in ["brand", "category", "color", "color_group", "price_range"]:
+                if not detected_preferences.get(key,False): #Reset filters not mentioned
+                    self.user_preferences[key] = None # Ignore unrelated filters temporarily
+
+        # Count the number of active filters (excluding `exclude`)
+        num_active_filters = sum(1 for key in detected_preferences if self.user_preferences.get(key) is not None)
+
+        # Ignore unrelated filters **for this request only**
+        if num_active_filters == 1:
+            for key in detected_preferences:
+                if not detected_preferences.get(key,False):
+                    self.user_preferences[key] = None  # Ignore unrelated filters **temporarily**
+
         # Debugging: Print stored preferences
         print("Current Preferences:", self.user_preferences)
 
