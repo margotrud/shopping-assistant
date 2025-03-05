@@ -83,23 +83,62 @@ class ShoppingChatbot:
         """
         matching_products = []
 
+        #Detect which preference(s) were mentioned
+        num_active_filters = sum(1 for key in self.user_preferences if self.user_preferences[key] is not None)
+
         for product in self.products:
+            # if only brand is specified, return all products from that brand
+            if num_active_filters == 1 and self.user_preferences["brand"]:
+                if product["brand"].lower() == self.user_preferences["brand"]:
+                    matching_products.append(product)
+                continue #Skip other filters
+
             # Match category if specified
-            if self.user_preferences["category"] and product["category"].lower() != self.user_preferences["category"]:
+            if num_active_filters == 1 and self.user_preferences["category"]:
+                if product["category"].lower() == self.user_preferences["category"]:
+                    matching_products.append(product)
                 continue
 
             # Match color if specified
-            if self.user_preferences["color"] and product["color"].lower() != self.user_preferences["color"]:
+            if num_active_filters == 1 and self.user_preferences["color"]:
+                if product["color"].lower() == self.user_preferences["color"]:
+                    matching_products.append(product)
                 continue
 
             # Match color group if specified
+            if num_active_filters == 1 and self.user_preferences["color_group"]:
+                if product["color"].lower() in self.color_groups.get(self.user_preferences["color_group"], {}):
+                    matching_products.append(product)
+                continue
+
+            if num_active_filters == 1 and self.user_preferences["price_range"]:
+                # Assuming products have a price field as a float
+                product_price = float(product.get("price", 0))
+                max_price = float(self.user_preferences["price_range"].replace("$", ""))
+                if product_price <= max_price:
+                    matching_products.append(product)
+                continue
+
+            # ✅ Otherwise, apply all active filters as normal
+            if self.user_preferences["category"] and product["category"].lower() != self.user_preferences[
+                "category"]:
+                continue
+
+            if self.user_preferences["color"] and product["color"].lower() != self.user_preferences["color"]:
+                continue
+
             if self.user_preferences["color_group"]:
                 if product["color"].lower() not in self.color_groups.get(self.user_preferences["color_group"], {}):
                     continue
 
-            # Match brand if specified
             if self.user_preferences["brand"] and product["brand"].lower() != self.user_preferences["brand"]:
                 continue
+
+            if self.user_preferences["price_range"]:
+                product_price = float(product.get("price", 0))
+                max_price = float(self.user_preferences["price_range"].replace("$", ""))
+                if product_price > max_price:
+                    continue
 
             # Add matching product
             matching_products.append(product)
@@ -114,17 +153,33 @@ class ShoppingChatbot:
         """
         updated = False # Track if a preference is updated
 
+        # Track what type of preference was detected
+        detected_preferences = {"brand": False, "category": False, "color": False, "color_group": False, "price_range": False}
+
+        #Extract brand (if mentioned)
+        for brand in self.brands:
+            if brand in user_input.lower():
+                self.user_preferences["brand"] = brand
+                detected_preferences["brand"] = True
+                updated = True
+                break
+
+        #Extract category (if mentioned)
+
         # Extract category
         for cat in self.categories:
             if cat.lower() in user_input.lower():
                 self.user_preferences["category"] = cat
+                detected_preferences["category"] = True
                 updated = True
+                break
 
             # Check if the user specified a general color (e.g. "pink")
         for base_color, shades in self.color_groups.items():
             if base_color in user_input.lower():
                 self.user_preferences["color_group"] = base_color # Offer all shades of this base color
                 self.user_preferences["color"] = None # Clear specific color
+                detected_preferences["color_group"] = True
                 updated = True
                 break
 
@@ -133,22 +188,24 @@ class ShoppingChatbot:
             if color in user_input.lower():
                 self.user_preferences["color"] = color # Store specific shade
                 self.user_preferences["color_group"] = None # Remove general color
+                detected_preferences["color"] = True
                 updated = True
                 break
 
-        # Extract brand
-        for brand in self.brands:
-            if brand.lower() in user_input.lower():
-                self.user_preferences["brand"] = brand
-                updated = True
 
         #Extract price
         price_pattern =  r"\$(\d+)|(\d+\s?(dollars|euros|shekels))"
         match = re.search(price_pattern, user_input)
         if match:
             self.user_preferences["price_range"] = match.group(0)
+            detected_preferences["price_range"] = True
             updated = True
 
+        #If only one preference is mentioned, reset the others:
+        if sum(detected_preferences.values()) == 1:
+            for key in self.user_preferences.keys():
+                if not detected_preferences[key]: #Reset filters not mentioned
+                    self.user_preferences[key] = None
         # Debugging: Print stored preferences
         print("Current Preferences:", self.user_preferences)
 
