@@ -16,7 +16,7 @@ class ShoppingChatbot:
         self.dataset_path = dataset_path
 
         #Load dataset dynamically
-        self.categories, self.colors, self.brands, self.color_groups = self.load_product_data()
+        self.products, self.categories, self.colors, self.brands, self.color_groups = self.load_product_data()
 
         # User preferences storage
         self.user_preferences = {
@@ -74,8 +74,37 @@ class ShoppingChatbot:
         print(f"Loaded {len(categories)} categories, {len(colors)} colors, {len(brands)} brands.")  # Debugging
         print(f"Color Groups: {color_groups}")  # Debugging
 
-        return categories, colors, brands, color_groups
+        return products, categories, colors, brands, color_groups
 
+    def find_matching_products(self):
+        """
+        Finds products that match user preferences (category, color, brand).
+        :return:
+        """
+        matching_products = []
+
+        for product in self.products:
+            # Match category if specified
+            if self.user_preferences["category"] and product["category"].lower() != self.user_preferences["category"]:
+                continue
+
+            # Match color if specified
+            if self.user_preferences["color"] and product["color"].lower() != self.user_preferences["color"]:
+                continue
+
+            # Match color group if specified
+            if self.user_preferences["color_group"]:
+                if product["color"].lower() not in self.color_groups.get(self.user_preferences["color_group"], {}):
+                    continue
+
+            # Match brand if specified
+            if self.user_preferences["brand"] and product["brand"].lower() != self.user_preferences["brand"]:
+                continue
+
+            # Add matching product
+            matching_products.append(product)
+
+        return matching_products
 
     def extract_preferences(self, user_input):
         """
@@ -135,21 +164,21 @@ class ShoppingChatbot:
 
         #If preferences are detected personalize response
         if updated:
-            response = "Got it! You're looking for"
-            # If a category is specified, mention it, otherwise keep it neutral
-            category_text = f"{self.user_preferences['category']}" if self.user_preferences["category"] else "products"
+            matching_products = self.find_matching_products()
 
-            if self.user_preferences["color_group"]:
-                shades = ", ".join(self.color_groups[self.user_preferences["color_group"]])
-                response += f"{category_text} in shades of {self.user_preferences['color_group']} ({shades})"
-            elif self.user_preferences["color"]:
-                response += f" a {self.user_preferences['color']}"
+            if matching_products:
+                response = "Here are some options for you:\n"
+                for product in matching_products[:5]: #limit to top 5 results
+                    response += f"- **{product['name']}** ({product['brand']}) - ${product['price']}\n"
+                    if "url" in product:
+                        response += f"  [View Product]({product['url']})\n"
 
-            if self.user_preferences["brand"]:
-                response += f" from {self.user_preferences['brand']}"
-            if self.user_preferences["price_range"]:
-                response += f" around {self.user_preferences['price_range']}"
-            return response + ". Let me find the best options for you!"
+                return response
+
+            else:
+                return "I couldn't find any exact matches, but let me know if you’d like other recommendations!"
+
+        return "Can you clarify what you're looking for? I'd love to help!"
 
          #Add a context to guide responses
         shopping_context = "You are a helpful AI shopping assistant. Your goal is to recommend beauty and makeup products based on user preferences."
