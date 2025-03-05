@@ -9,20 +9,21 @@ class ShoppingChatbot:
         Initialize the chatbot with the selected DialoGPT model.
         :param model_name:
         """
-        print("Loading chatbot model...")
+        print("Loading chatbot model... This may take a few seconds...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
         self.chat_history_ids = None #Store conversation history
         self.dataset_path = dataset_path
 
         #Load dataset dynamically
-        self.categories, self.colors, self.brands = self.load_product_data()
+        self.categories, self.colors, self.brands, self.color_groups = self.load_product_data()
 
         # User preferences storage
         self.user_preferences = {
             "category": None,
             "brand": None,
             "color": None,
+            "color_group": None, #General color
             "price_range": None
         }
 
@@ -38,21 +39,43 @@ class ShoppingChatbot:
             print(f"Error: {self.dataset_path} not found.")
             return set(), set(), set()
 
-        categories = set()
-        colors = set()
-        brands = set()
+        categories, colors, brands = set(), set(), set()
+        color_groups = {}
+
+        # Predefined core colors
+        core_colors = {"pink", "red", "beige", "purple", "peach", "brown", "blue"}
 
         for product in products:
             if "category" in product and product["category"]:
                 categories.add(product["category"].strip().lower())
             if "color" in product and product["color"]:
-                colors.add(product["color"].strip().lower())  # Ensure colors are lowercase
+                color_name = product["color"].strip().lower()
+                colors.add(color_name)
+
+                # Find which core color (if any) is in this name
+                assigned = False
+                for core_color in core_colors:
+                    if core_color in color_name:
+                        if core_color not in color_groups:
+                            color_groups[core_color] = set()
+                        color_groups[core_color].add(color_name)
+                        assigned = True
+
+                #If no core colour was found, store as is:
+                if not assigned:
+                    if "other" not in color_groups:
+                        color_groups["other"] = set()
+                    color_groups["other"].add(color_name)
+
+
             if "brand" in product and product["brand"]:
                 brands.add(product["brand"].strip().lower())
-    # Debugging: Print loaded colors
-        print(f"Loaded Colors: {colors}")  # Check if "pink" is present
 
-        return categories, colors, brands
+        print(f"Loaded {len(categories)} categories, {len(colors)} colors, {len(brands)} brands.")  # Debugging
+        print(f"Color Groups: {color_groups}")  # Debugging
+
+        return categories, colors, brands, color_groups
+
 
     def extract_preferences(self, user_input):
         """
@@ -62,21 +85,27 @@ class ShoppingChatbot:
         """
         updated = False # Track if a preference is updated
 
-
         # Extract category
         for cat in self.categories:
             if cat.lower() in user_input.lower():
                 self.user_preferences["category"] = cat
                 updated = True
 
-            # **Fuzzy match color**
+            # Check if the user specified a general color (e.g. "pink")
+        for base_color, shades in self.color_groups.items():
+            if base_color in user_input.lower():
+                self.user_preferences["color_group"] = base_color # Offer all shades of this base color
+                self.user_preferences["color"] = None # Clear specific color
+                updated = True
+                break
+
+        # Check if the user specified a specific color variation (e.g., "pink nude")
         for color in self.colors:
-            color_words = color.split()  # Split "Pink Nude" into ["Pink", "Nude"]
-            for word in color_words:
-                if word in user_input.lower():
-                    self.user_preferences["color"] = color  # Store full color name
-                    updated = True
-                    break  # Stop once we find a match
+            if color in user_input.lower():
+                self.user_preferences["color"] = color # Store specific shade
+                self.user_preferences["color_group"] = None # Remove general color
+                updated = True
+                break
 
         # Extract brand
         for brand in self.brands:
@@ -107,10 +136,15 @@ class ShoppingChatbot:
         #If preferences are detected personalize response
         if updated:
             response = "Got it! You're looking for"
-            if self.user_preferences["color"]:
+            # If a category is specified, mention it, otherwise keep it neutral
+            category_text = f"{self.user_preferences['category']}" if self.user_preferences["category"] else "products"
+
+            if self.user_preferences["color_group"]:
+                shades = ", ".join(self.color_groups[self.user_preferences["color_group"]])
+                response += f"{category_text} in shades of {self.user_preferences['color_group']} ({shades})"
+            elif self.user_preferences["color"]:
                 response += f" a {self.user_preferences['color']}"
-            if self.user_preferences["category"]:
-                response += f" {self.user_preferences['category']}"
+
             if self.user_preferences["brand"]:
                 response += f" from {self.user_preferences['brand']}"
             if self.user_preferences["price_range"]:
@@ -121,7 +155,7 @@ class ShoppingChatbot:
         shopping_context = "You are a helpful AI shopping assistant. Your goal is to recommend beauty and makeup products based on user preferences."
 
         #Format input with context
-        new_input = f"{shopping_context} User: {user_input} AI:"
+        new_input = f"{shopping_context}\nUser: {user_input}\nAI:"
         new_input_ids = self.tokenizer.encode(new_input + self.tokenizer.eos_token, return_tensors="pt")
 
         # Concatenate with previous chat history (if available)
